@@ -1,0 +1,59 @@
+name: Deploy to EC2 Environments
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - ec2-test
+      - ec2-prod
+    paths-ignore:
+      - ".github/workflows/*"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: "18.x"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build the project
+        run: npm run build
+
+      - name: Set EC2 host based on branch
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/ec2-prod" ]]; then
+            echo "EC2_HOST=${{ secrets.EC2_HOST_PROD }}" >> $GITHUB_ENV
+          elif [[ "${{ github.ref }}" == "refs/heads/ec2-test" ]]; then
+            echo "EC2_HOST=${{ secrets.EC2_HOST_TEST }}" >> $GITHUB_ENV
+          else 
+            echo "EC2_HOST=${{ secrets.EC2_HOST_DEV }}" >> $GITHUB_ENV
+          fi
+
+      - name: Copy Files to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          strip_components: 1
+          source: "./hero-mobile-backend"
+          target: "/home/${{ secrets.EC2_USER }}/hero-mobile-backend"
+
+      - name: Restart Application with PM2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/${{ secrets.EC2_USER }}/hero-mobile-backend
+            pm2 restart hero-mobile-backend --update-env
